@@ -1,0 +1,65 @@
+image: dtzar/helm-kubectl
+
+# services:
+#   - docker:19.03.12-dind
+
+variables:
+  DOCKER_DRIVER: overlay2
+  APP_NAME: "${CI_PROJECT_NAME}"
+  NAMESPACE: samplens
+  REGION: "ap-northeast-2"
+  EKS_NAME: "EKS-CLS-SAMPLE"
+
+stages:
+  - deploy
+  - rollout
+
+deploy:
+  stage: deploy
+  environment:
+    name: ${CI_COMMIT_BRANCH}
+  before_script:
+    - apk update
+    - apk add --no-cache aws-cli
+    - apk add --no-cache jq
+    
+  script:
+    - aws eks --region ${REGION} update-kubeconfig --name ${EKS_NAME}
+    - kubectl config set-context $(kubectl config current-context) --namespace=${NAMESPACE}
+    
+    - ACCESSKEY=`aws ssm get-parameter --name ACCESS_KEY --with-decryption --query 'Parameter.Value' --region ap-northeast-2 --output text`
+    - SECRETKEY=`aws ssm get-parameter --name SECRET_KEY --with-decryption --query 'Parameter.Value' --region ap-northeast-2  --output text`
+    - sed -i "s~<ACCESSKEY>~${ACCESSKEY}~g" configures.yml
+    - sed -i "s~<SECRETKEY>~${SECRETKEY}~g" configures.yml
+    - sed -i "s/<NAMESPACE>/${NAMESPACE}/g" configures.yml
+    - cat configures.yml
+    - cat configures.yml | kubectl apply -f -
+
+  only:
+    - develop
+    - master
+
+  when: always
+
+rollout:
+  stage: rollout
+  environment:
+    name: ${CI_COMMIT_BRANCH}
+  before_script:
+    - apk update
+    - apk add --no-cache
+      aws-cli
+    - apk add --no-cache jq
+
+  script:
+    - aws eks --region ${REGION} update-kubeconfig --name ${EKS_NAME}
+    - kubectl config set-context $(kubectl config current-context) --namespace=${NAMESPACE}
+
+    - kubectl rollout restart -n ${NAMESPACE} deployment/reviews-v1 deployment/reviews-v2 deployment/reviews-v3
+
+  only:
+    - develop
+    - master
+
+  when: always
+
